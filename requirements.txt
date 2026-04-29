@@ -1,0 +1,4 @@
+livekit-agents[openai,silero,deepgram,cartesia,tavus]
+python-dotenv
+
+livekit-client @livekit/components-react @livekit/components-styles
