@@ -32,9 +32,9 @@ from livekit.plugins import noise_cancellation, silero, tavus
 
 logger = logging.getLogger("healthdesk-agent")
 
-# load_dotenv()
-ROOT_DIR = Path(__file__).resolve().parents[2]
-load_dotenv(ROOT_DIR / ".env")
+load_dotenv()
+# ROOT_DIR = Path(__file__).resolve().parents[2]
+# load_dotenv(ROOT_DIR / ".env")
 
 
 DB_PATH = "healthdesk.db"
