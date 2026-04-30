@@ -39,4 +39,31 @@ HealthtDesk AI supports multiple patient intents, including:
   <em>HealthDesk AI – Voice-Based Appointment Booking Demo</em>
 </p>
 
+---
 
+#### Cost Per Call Breakdown
+
+Estimated cost depends on call length and provider usage.
+
+For a typical 3-minute call:
+
+| Service | Usage | Estimated Cost |
+|---|---:|---:|
+| LiveKit Cloud | Room/media transport | Usage-based |
+| Deepgram STT | ~3 minutes audio | ~$0.0175 |
+| OpenAI GPT-4o-mini | ~2k input + 500 output tokens | <$0.01 |
+| Cartesia TTS | ~1–2 minutes generated speech | Usage-based |
+| Tavus Avatar | Conversational avatar minutes | Usage-based |
+
+---
+#### Smart Edge-Case Handling
+
+HealthDesk AI handles common real-world appointment issues:
+
+| Edge Case | Handling |
+|---|---|
+| Missing phone number | Assistant asks for phone number before continuing |
+| Missing date or time | Assistant asks one clear follow-up question |
+| No available slots | Assistant offers the user another date |
+| Cancel appointment not found | Assistant explains no active appointment was found |
+| Reschedule conflict | Assistant tells user the new slot is already taken |
