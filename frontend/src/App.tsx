@@ -57,13 +57,14 @@ function App() {
         await room.localParticipant.setMicrophoneEnabled(true);
         console.log("Microphone enabled");
 
-        room.registerRpcMethod("toolStatus", async (data) => {
+
+        room.registerRpcMethod("toolStatus", async (data: any) => {
           const payload = JSON.parse(data.payload);
           setEvents((prev) => [`${payload.label}`, ...prev]);
           return "toolStatus received";
         });
 
-        room.registerRpcMethod("patientIdentified", async (data) => {
+        room.registerRpcMethod("patientIdentified", async (data: any) => {
           const payload = JSON.parse(data.payload);
 
           setPatientName(payload.name);
@@ -77,7 +78,7 @@ function App() {
           return "slotsLoaded received";
         });
 
-        room.registerRpcMethod("appointmentBooked", async (data) => {
+        room.registerRpcMethod("appointmentBooked", async (data: any) => {
           const payload = JSON.parse(data.payload);
 
           setAppointments((prev) => [...prev, payload]);
@@ -114,7 +115,8 @@ function App() {
         //   return "sessionEnded received";
         // });
 
-        room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        // room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        room.on(RoomEvent.TrackSubscribed, (track: any, _publication: any, participant: any) => {
           console.log("Track subscribed:", track.kind, participant.identity);
 
           if (track.kind === Track.Kind.Video && videoRef.current) {
