@@ -1,6 +1,6 @@
 ## 🩺 FrontDesk AI
 
-FrontDesk AI is an intelligent voice-based front assistant designed to handle patient interactions in real time.
+FrontDesk AI is an intelligent voice-based assistant designed to handle patient interactions in real time.
 
 ---
 
