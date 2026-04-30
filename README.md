@@ -1,12 +1,12 @@
-## 🩺 FrontDesk AI
+## 🩺 HealthDesk AI
 
-FrontDesk AI is an intelligent voice-based assistant designed to handle patient interactions in real time.
+HealthDesk AI is an intelligent voice-based assistant designed to handle patient interactions in real time.
 
 ---
 
 ### 🚀 Features
 
-FrontDesk AI supports multiple patient intents, including:
+HealthtDesk AI supports multiple patient intents, including:
 
 #### 📅 Appointment Management
 
