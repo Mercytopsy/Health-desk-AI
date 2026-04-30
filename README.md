@@ -24,4 +24,4 @@ HealthtDesk AI supports multiple patient intents, including:
 
 
 #### HealthDesk AI – Voice-Based Appointment Booking Demo
-[Watch Demo](https://github.com/Mercytopsy/Health-desk-AI/blob/main/assets/HealthDesk-AI%20Voice%20Agent.mp4)
+[![Watch Demo](https://img.youtube.com/vi/0GaWVmGoIW8/0.jpg)](https://youtu.be/0GaWVmGoIW8)
