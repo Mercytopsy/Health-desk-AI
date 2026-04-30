@@ -1,1 +1,23 @@
-FrontDesk AI is an intelligent voice-based front desk assistant designed for healthcare environments. It handles patient interactions in real time, streamlining identification and appointment scheduling through natural conversation.
+## 🩺 FrontDesk AI
+
+FrontDesk AI is an intelligent voice-based front assistant designed to handle patient interactions in real time.
+
+---
+
+### 🚀 Features
+
+FrontDesk AI supports multiple patient intents, including:
+
+#### 📅 Appointment Management
+
+- **Book Appointments**  
+  Schedule new appointments through a voice-driven interaction.
+
+- **View Appointments (`get_appointments`)**  
+  Retrieve existing bookings for a patient.
+
+- **Cancel Appointments (`cancel_appointment`)**  
+  Cancel a scheduled appointment quickly and efficiently.
+
+- **Reschedule Appointments**  
+  Modify an existing appointment to a new date or time.

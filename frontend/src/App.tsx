@@ -1,256 +1,188 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  LiveKitRoom,
-  RoomAudioRenderer,
-  VideoTrack,
-  useTracks,
-} from "@livekit/components-react";
-import "@livekit/components-styles";
-import { Room, Track } from "livekit-client";
+import { useEffect, useRef, useState } from "react";
+import { Room, RoomEvent, Track } from "livekit-client";
 import "./App.css";
 
-type Appointment = {
-  id?: number;
-  name?: string;
-  date: string;
-  time: string;
-  intent?: string;
-};
-
-type Patient = {
-  name: string;
-  phone: string;
-  returning: boolean;
-};
-
-type ToolEvent = {
-  id: string;
-  label: string;
-  status: "loading" | "success" | "error";
-  timestamp: string;
-};
-
 function App() {
-  const [token, setToken] = useState<string>("");
-  const room = useMemo(() => new Room(), []);
+  const [status, setStatus] = useState("Preparing HealthDesk...");
+  const [events, setEvents] = useState<string[]>([]);
+
+  const [patientName, setPatientName] = useState("");
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [callEnded, setCallEnded] = useState(false);
+  const [endedAt, setEndedAt] = useState("");
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    async function getToken() {
-      const identity = `patient-${crypto.randomUUID()}`;
+    const room = new Room();
+    let cleanedUp = false;
 
-      const res = await fetch(
-        `${import.meta.env.VITE_TOKEN_ENDPOINT}?identity=${identity}`
-      );
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
 
-      const data = await res.json();
-      setToken(data.token);
+      console.log("Cleaning up LiveKit room...");
+
+      room.localParticipant.setMicrophoneEnabled(false).catch(console.warn);
+
+      room.localParticipant.trackPublications.forEach((publication) => {
+        publication.track?.stop();
+      });
+
+      room.disconnect();
+    };
+
+    window.addEventListener("beforeunload", cleanup);
+
+    async function start() {
+      try {
+        setStatus("Getting LiveKit token...");
+
+        const roomName = `healthdesk-room-${crypto.randomUUID()}`;
+
+        const res = await fetch(
+          `${import.meta.env.VITE_TOKEN_ENDPOINT}?identity=patient-test&room=${roomName}`
+        );
+
+        const data = await res.json();
+        console.log("TOKEN DATA:", data);
+
+        setStatus("Connecting to LiveKit...");
+
+        await room.connect(import.meta.env.VITE_LIVEKIT_URL, data.token);
+
+        setStatus("Connected to HealthDesk");
+
+        await room.localParticipant.setMicrophoneEnabled(true);
+        console.log("Microphone enabled");
+
+        room.registerRpcMethod("toolStatus", async (data) => {
+          const payload = JSON.parse(data.payload);
+          setEvents((prev) => [`${payload.label}`, ...prev]);
+          return "toolStatus received";
+        });
+
+        room.registerRpcMethod("patientIdentified", async (data) => {
+          const payload = JSON.parse(data.payload);
+
+          setPatientName(payload.name);
+
+          setEvents((prev) => [`Patient identified ✅`, ...prev]);
+
+          return "patientIdentified received";
+        });
+
+        room.registerRpcMethod("slotsLoaded", async () => {
+          return "slotsLoaded received";
+        });
+
+        room.registerRpcMethod("appointmentBooked", async (data) => {
+          const payload = JSON.parse(data.payload);
+
+          setAppointments((prev) => [...prev, payload]);
+
+          return "appointmentBooked received";
+        });
+
+        room.registerRpcMethod("appointmentCancelled", async () => {
+          return "Appointment Cancelled";
+        });
+
+        room.registerRpcMethod("appointmentRescheduled", async () => {
+          return "Appointment Rescheduled";
+        });
+
+        room.registerRpcMethod("sessionEnded", async () => {
+          setCallEnded(true);
+          setEndedAt(new Date().toLocaleString());
+
+          setEvents((prev) => ["Call ended. Summary generated ✅", ...prev]);
+          setStatus("Call ended");
+
+          cleanup();
+
+          return "sessionEnded received";
+        });
+
+        // room.registerRpcMethod("sessionEnded", async () => {
+        //   setCallEnded(true);
+        //   setEndedAt(new Date().toLocaleString());
+        //   setEvents((prev) => ["Call ended. Summary generated ✅", ...prev]);
+        //   setStatus("Call ended");
+
+        //   return "sessionEnded received";
+        // });
+
+        room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          console.log("Track subscribed:", track.kind, participant.identity);
+
+          if (track.kind === Track.Kind.Video && videoRef.current) {
+            track.attach(videoRef.current);
+          }
+
+          if (track.kind === Track.Kind.Audio && audioRef.current) {
+            track.attach(audioRef.current);
+
+            audioRef.current.play().catch((err) => {
+              console.warn("Audio play blocked:", err);
+            });
+          }
+        });
+      } catch (err) {
+        console.error("LiveKit connection error:", err);
+        setStatus("Connection failed. Check console.");
+      }
     }
 
-    getToken();
-  }, []);
-
-  if (!token) {
-    return <div className="loading">Preparing HealthDesk...</div>;
-  }
-
-  return (
-    <LiveKitRoom
-      room={room}
-      token={token}
-      serverUrl={import.meta.env.VITE_LIVEKIT_URL}
-      connect
-      audio
-      video={false}
-    >
-      <HealthDeskUI room={room} />
-      <RoomAudioRenderer />
-    </LiveKitRoom>
-  );
-}
-
-function HealthDeskUI({ room }: { room: Room }) {
-  const [patient, setPatient] = useState<Patient | null>(null);
-  const [slots, setSlots] = useState<string[]>([]);
-  const [slotDate, setSlotDate] = useState<string>("");
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
-  const [sessionEnded, setSessionEnded] = useState(false);
-
-  function addToolEvent(label: string, status: ToolEvent["status"] = "success") {
-    setToolEvents((prev) => [
-      {
-        id: crypto.randomUUID(),
-        label,
-        status,
-        timestamp: new Date().toLocaleString(),
-      },
-      ...prev,
-    ]);
-  }
-
-  useEffect(() => {
-    room.registerRpcMethod("patientIdentified", async (data) => {
-      const payload = JSON.parse(data.payload);
-      setPatient(payload);
-      addToolEvent(
-        payload.returning
-          ? `Returning patient found: ${payload.name}`
-          : `New patient registered: ${payload.name}`
-      );
-      return "patientIdentified received";
-    });
-
-    room.registerRpcMethod("slotsLoaded", async (data) => {
-      const payload = JSON.parse(data.payload);
-      setSlotDate(payload.date);
-      setSlots(payload.slots);
-      addToolEvent("Fetching slots complete ✅");
-      return "slotsLoaded received";
-    });
-
-    room.registerRpcMethod("appointmentBooked", async (data) => {
-      const payload = JSON.parse(data.payload);
-      setAppointments((prev) => [...prev, payload]);
-      addToolEvent("Booking confirmed ✅");
-      return "appointmentBooked received";
-    });
-
-    room.registerRpcMethod("appointmentsLoaded", async (data) => {
-      const payload = JSON.parse(data.payload);
-      setAppointments(payload.appointments);
-      addToolEvent("Appointments loaded ✅");
-      return "appointmentsLoaded received";
-    });
-
-    room.registerRpcMethod("appointmentCancelled", async (data) => {
-      const payload = JSON.parse(data.payload);
-      setAppointments((prev) =>
-        prev.filter(
-          (a) => !(a.date === payload.date && a.time === payload.time)
-        )
-      );
-      addToolEvent("Appointment cancelled ✅");
-      return "appointmentCancelled received";
-    });
-
-    room.registerRpcMethod("appointmentRescheduled", async (data) => {
-      const payload = JSON.parse(data.payload);
-
-      setAppointments((prev) =>
-        prev.map((a) =>
-          a.date === payload.old_date && a.time === payload.old_time
-            ? { ...a, date: payload.new_date, time: payload.new_time }
-            : a
-        )
-      );
-
-      addToolEvent("Appointment rescheduled ✅");
-      return "appointmentRescheduled received";
-    });
-
-    room.registerRpcMethod("sessionEnded", async () => {
-      setSessionEnded(true);
-      addToolEvent("Call ended. Summary generated ✅");
-      return "sessionEnded received";
-    });
+    start();
 
     return () => {
-      room.unregisterRpcMethod("patientIdentified");
-      room.unregisterRpcMethod("slotsLoaded");
-      room.unregisterRpcMethod("appointmentBooked");
-      room.unregisterRpcMethod("appointmentsLoaded");
-      room.unregisterRpcMethod("appointmentCancelled");
-      room.unregisterRpcMethod("appointmentRescheduled");
-      room.unregisterRpcMethod("sessionEnded");
+      window.removeEventListener("beforeunload", cleanup);
+      cleanup();
     };
-  }, [room]);
+  }, []);
 
   return (
     <main className="page">
-      <section className="hero">
-        <div>
-          <p className="eyebrow">HealthDesk AI</p>
-          <h1>Dr. Aria</h1>
-          <p>Your AI health concierge</p>
-        </div>
+      <audio ref={audioRef} autoPlay hidden />
 
-        <AgentVideo />
+      <section className="card">
+        <h1>HealthDesk AI</h1>
+        <p>{status}</p>
       </section>
 
-      <section className="grid">
-        <div className="card">
-          <h2>Patient</h2>
-          {patient ? (
-            <>
-              <p><strong>Name:</strong> {patient.name}</p>
-              <p><strong>Phone:</strong> {patient.phone}</p>
-              <p><strong>Status:</strong> {patient.returning ? "Returning" : "New"}</p>
-            </>
-          ) : (
-            <p>Waiting for patient identification...</p>
-          )}
-        </div>
-
-        <div className="card">
-          <h2>Tool Activity</h2>
-          {toolEvents.length === 0 ? (
-            <p>No tools called yet.</p>
-          ) : (
-            <ul className="events">
-              {toolEvents.map((event) => (
-                <li key={event.id} className={event.status}>
-                  <span>{event.label}</span>
-                  <small>{event.timestamp}</small>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="card">
-          <h2>Available Slots</h2>
-          {slots.length > 0 ? (
-            <>
-              <p>{slotDate}</p>
-              <div className="slots">
-                {slots.map((slot) => (
-                  <span key={slot}>{slot}</span>
-                ))}
-              </div>
-            </>
-          ) : (
-            <p>No slots loaded yet.</p>
-          )}
-        </div>
-
-        <div className="card">
-          <h2>Appointments</h2>
-          {appointments.length > 0 ? (
-            <ul className="appointments">
-              {appointments.map((appt, index) => (
-                <li key={`${appt.date}-${appt.time}-${index}`}>
-                  <strong>{appt.date}</strong> at <strong>{appt.time}</strong>
-                  <br />
-                  <span>{appt.intent || "consultation"}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>No appointments yet.</p>
-          )}
-        </div>
+      <section className="card">
+        <h2>👤 Grace</h2>
+        <video ref={videoRef} autoPlay playsInline />
       </section>
 
-      {sessionEnded && (
+      <section className="card">
+        <h2>Assistant Activity</h2>
+        {events.length === 0 ? (
+          <p>No activity yet</p>
+        ) : (
+          <ul>
+            {events.map((event, index) => (
+              <li key={index}>{event}</li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {callEnded && (
         <section className="summary">
           <h2>Call Summary</h2>
+
           <p>
-            Conversation completed with{" "}
-            <strong>{patient?.name || "the patient"}</strong>.
+            <strong>Summary:</strong>{" "}
+            Conversation completed with {patientName || "the patient"}.
           </p>
 
           <h3>Appointments</h3>
-          {appointments.length > 0 ? (
+          {appointments.length === 0 ? (
+            <p>No appointments were booked.</p>
+          ) : (
             <ul>
               {appointments.map((appt, index) => (
                 <li key={index}>
@@ -258,36 +190,16 @@ function HealthDeskUI({ room }: { room: Room }) {
                 </li>
               ))}
             </ul>
-          ) : (
-            <p>No confirmed appointments captured.</p>
           )}
 
           <h3>User Preferences</h3>
-          <p>No explicit preferences captured yet.</p>
+          <p>No explicit preferences captured.</p>
 
           <h3>Timestamp</h3>
-          <p>{new Date().toLocaleString()}</p>
+          <p>{endedAt}</p>
         </section>
       )}
     </main>
-  );
-}
-
-function AgentVideo() {
-  const tracks = useTracks([Track.Source.Camera], {
-    onlySubscribed: true,
-  });
-
-  const videoTrack = tracks[0];
-
-  if (!videoTrack) {
-    return <div className="avatar-placeholder">Waiting for Dr. Aria video...</div>;
-  }
-
-  return (
-    <div className="avatar">
-      <VideoTrack trackRef={videoTrack} />
-    </div>
   );
 }
 

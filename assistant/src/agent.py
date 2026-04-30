@@ -6,6 +6,7 @@ import sqlite3
 from typing import Annotated
 
 from dotenv import load_dotenv
+from datetime import date
 from pydantic import Field
 
 from livekit import rtc
@@ -26,7 +27,7 @@ from livekit.agents import (
     room_io,
 )
 from livekit.plugins import noise_cancellation, silero, tavus
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
+# from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 logger = logging.getLogger("healthdesk-agent")
 
@@ -68,106 +69,48 @@ def init_db():
     conn.commit()
     conn.close()
 
-# def init_db():
-#     conn = sqlite3.connect(DB_PATH)
-#     c = conn.cursor()
-#     c.execute("""
-#         CREATE TABLE IF NOT EXISTS patients (
-#             phone      TEXT PRIMARY KEY,
-#             name       TEXT,
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP
-#         )
-#     """)
-#     c.execute("""
-#         CREATE TABLE IF NOT EXISTS appointments (
-#             id         INTEGER PRIMARY KEY AUTOINCREMENT,
-#             phone      TEXT NOT NULL,
-#             name       TEXT,
-#             date       TEXT NOT NULL,
-#             time       TEXT NOT NULL,
-#             intent     TEXT DEFAULT 'consultation',
-#             status     TEXT DEFAULT 'confirmed',
-#             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-#             UNIQUE(date, time)
-#         )
-#     """)
-#     conn.commit()
-#     conn.close()
 
-
-# ─────────────────────────────────────────────
-# RPC HELPERS
-# ─────────────────────────────────────────────
-
-
-
-# def get_remote_participant_identity(ctx: JobContext) -> str:
-#     """
-#     Get the patient's participant identity.
-#     Excludes Tavus avatar participants (they join as "Tavus-avatar-agent").
-#     """
-#     for participant in ctx.room.remote_participants.values():
-#         if not participant.identity.startswith("Tavus-avatar-agent"):
-#             return participant.identity
-#     raise llm.LLMToolException("No remote participant found")
-
-# async def rpc_to_frontend(ctx: JobContext, method: str, payload: dict) -> str:
-#     """Send an RPC call to the patient's browser to update the UI."""
-#     local = ctx.room.local_participant
-#     if not local:
-#         raise llm.LLMToolException("Agent not connected to room")
-
-#     destination = get_remote_participant_identity(ctx)
-#     response = await local.perform_rpc(
-#         destination_identity=destination,
-#         method=method,
-#         payload=json.dumps(payload),
-#         response_timeout=5.0,
-#     )
-#     return response
-
-# async def notify_tool(
-#     ctx: JobContext, 
-#     label: str, 
-#     status: str = "loading", 
-#     details:dict | None = None
-# ):
-    
-#     """
-#     This is to notify the frontend whenever a tool starts, succeeds, or fails.
-#     Status can be: Fetching slots, Booking confirmed
-#     """
-#     await rpc_to_frontend(ctx, "toolStatus", {
-#         "label": label,
-#         "status": status,
-#         "details": details or {},
-#     })
 
 def get_remote_participant_identity(ctx: JobContext) -> str:
     """
-    Get the patient's participant identity.
-    Excludes Tavus avatar participants (they join as "Tavus-avatar-agent").
+    Get the patient's browser participant identity.
+    Excludes Tavus avatar and agent-like participants.
     """
     for participant in ctx.room.remote_participants.values():
-        if not participant.identity.startswith("Tavus-avatar-agent"):
-            return participant.identity
-    raise llm.LLMToolException("No remote participant found")
+        identity = participant.identity.lower()
+
+        if identity.startswith("tavus-avatar-agent"):
+            continue
+
+        if identity.startswith("healthdesk-ai"):
+            continue
+
+        return participant.identity
+
+    raise llm.LLMToolException("No patient/browser participant found")
 
 
-async def rpc_to_frontend(ctx: JobContext, method:str, payload: dict)-> str:
-     """Send an RPC call to the patient's browser to update the UI."""
-     local = ctx.room.local_participant
-     if not local:
-         raise llm.LLMToolException("Agent not connected to room")
-     
-     destination = get_remote_participant_identity(ctx)
-     response = await local.perform_rpc(
-         destination_identity=destination,
-         method = method,
-         payload = json.dumps(payload),
-         response_timeout=5.0,
-     )
-     return response
+async def rpc_to_frontend(ctx: JobContext, method: str, payload: dict) -> str:
+    """Send an RPC call to the patient's browser to update the UI."""
+    local = ctx.room.local_participant
+    if not local:
+        raise llm.LLMToolException("Agent not connected to room")
+
+    destination = get_remote_participant_identity(ctx)
+
+    try:
+        response = await local.perform_rpc(
+            destination_identity=destination,
+            method=method,
+            payload=json.dumps(payload),
+            response_timeout=10.0,
+        )
+        return response
+
+    except Exception as e:
+        logger.warning(f"RPC to frontend failed: {method} → {destination}: {e}")
+        return "RPC failed, but tool completed"
+
 
 
 async def notify_tool(
@@ -198,71 +141,57 @@ class HealthDeskAgent(Agent):
 
     def __init__(self, ctx: JobContext) -> None:
         self._ctx = ctx
+        today = date.today().isoformat()
         super().__init__(
-            instructions="""You are Dr. Grace, a warm and professional AI front-desk assistant for a clinic.
-           You speak with patients over voice and help them manage appointments.
+        instructions=f"""
+            You are Grace, a warm clinic front-desk voice assistant.
 
-            Your responsibilities:
-            - Identify patients
-            - Book appointments
-            - View appointments
-            - Cancel appointments
-            - Reschedule appointments
+            Today's date is {today}. Use this date when interpreting words like today, tomorrow, Friday, next week, or next month.
 
-            ────────────────────
-            CONVERSATION STYLE
-            ────────────────────
-            - Speak in short, natural sentences — this is voice, not text.
-            - Be warm, calm, and clear.
-            - Never use markdown, bullet points, asterisks, or stage directions.
-            - Confirm important details (name, phone number, date, time) before acting.
-            - Keep responses concise — under 3 sentences per turn.
+            When using appointment tools, always pass dates in YYYY-MM-DD format.
+            Never invent past dates.
 
-            ────────────────────
-            INTENT DETECTION (VERY IMPORTANT)
-            ────────────────────
-            Before taking any action, determine the patient's intent.
+            Your job is to help patients identify themselves and manage appointments:
+            book, view, cancel, or reschedule.
 
-            Supported intents:
-            
-            1. Identify patient → use identify_patient
-            2. Book appointment → use fetch_available_slots then book_appointment
-            3. View appointments → use get_appointments
-            4. Cancel appointment → use cancel_appointment
-            5. Reschedule appointment → use reschedule_appointment
-            6. End conversation → use end_conversation
+            Speak naturally and briefly.
+            Use 1 to 2 short sentences per reply.
+            Do not use markdown, bullets, symbols, or stage directions.
+            Confirm important details before taking action.
 
-            Always choose the correct tool based on intent.
-            ────────────────────
-            STRICT TOOL RULES
-            ────────────────────
-            - ALWAYS call identify_patient before any booking action.
-            - ALWAYS call fetch_available_slots before booking so you can offer real options.
-            - ALWAYS confirm date and time with the patient before calling book_appointment.
-            - For cancellations or modifications, confirm the existing appointment first.
-            - Call end_conversation when the patient says goodbye or is done.
+            Required flow:
+            1. Greet the patient.
+            2. Ask for name and phone number.
+            3. Call identify_patient.
+            4. Ask what they need help with.
+            5. Use the correct appointment tool.
+            6. Confirm the outcome.
+            7. Ask if they need anything else.
+            8. Call end_conversation when they are done.
 
-            ────────────────────
-            CONVERSATION FLOW (in order)
-            ────────────────────
-            1. Greet the patient warmly.
-            2. Ask for their name and phone number → call identify_patient.
-            3. Ask what they need help with today.
-            4. Handle their request using the appropriate tools.
-            5. Confirm all booking details clearly before saving.
-            6. Ask if there's anything else.
-            7. End the call warmly → call end_conversation.
+            Tool rules:
+            - Always call identify_patient before appointment actions.
+            - For booking, always call fetch_available_slots before book_appointment.
+            - Confirm date and time before booking.
+            - Confirm appointment details before cancelling or rescheduling.
+            - If information is missing, ask one clear question.
+            - Do not pretend to use tools. Call the actual tool.
 
-     
+            Intent mapping:
+            - New or returning patient: identify_patient
+            - Book appointment: fetch_available_slots, then book_appointment
+            - View appointments: get_appointments
+            - Cancel appointment: cancel_appointment
+            - Reschedule appointment: reschedule_appointment
+            - Goodbye or finished: end_conversation
+
             Opening line:
-            "Hello! Welcome to HealthDesk. I'm Dr. Aria, your AI health concierge. \
-            Could I start with your name and phone number, please?" """,
+            Hello! Welcome to HealthDesk. I'm Grace, your AI health concierge. Could I start with your name and phone number, please?
+            """,
         )
-
-
-
   
-        
+
+
 
     @function_tool
     async def identify_patient(
@@ -272,6 +201,8 @@ class HealthDeskAgent(Agent):
         name: Annotated[str, Field(description="Patient's name if provided")] = "",
     ) -> str:
         """Look up or register a patient by phone number. Always call this first."""
+        #await notify_tool(self._ctx, "Identifying patient...", "loading")
+
         phone_clean = "".join(filter(str.isdigit, phone))
         if len(phone_clean) < 10:
             return "Phone number seems too short — please ask the patient to repeat it."
@@ -295,9 +226,12 @@ class HealthDeskAgent(Agent):
             )
             conn.commit()
             conn.close()
+
+            #await notify_tool(self._ctx, f"Patient identified: {name} ✅", "success")
             await rpc_to_frontend(self._ctx, "patientIdentified", {
                 "phone": phone_clean, "name": resolved_name, "returning": False
             })
+            
             return f"New patient registered: {resolved_name}. Phone ends in {phone_clean[-4:]}."
 
 
@@ -310,7 +244,8 @@ class HealthDeskAgent(Agent):
     ) -> str:
         """Get available appointment slots for a given date. Call this before booking."""
 
-        await notify_tool(self._ctx, "Fetching Slots", "loading")
+        await notify_tool(self._ctx, "Fetching Slots...", "loading")
+        
         all_slots = [
             "09:00 AM", "09:30 AM", "10:00 AM", "10:30 AM",
             "11:00 AM", "11:30 AM", "02:00 PM", "02:30 PM",
@@ -347,6 +282,7 @@ class HealthDeskAgent(Agent):
         intent: Annotated[str, Field(description="Reason for visit")] = "Book appointment",
     ) -> str:
         """Book an appointment. Only call after confirming date, time, and reason with the patient."""
+        await notify_tool(self._ctx, "Booking appointment...", "loading")
         phone_clean = "".join(filter(str.isdigit, phone))
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -358,6 +294,8 @@ class HealthDeskAgent(Agent):
             )
             conn.commit()
             appt_id = c.lastrowid
+
+            await notify_tool(self._ctx, "Booking confirmed ✅", "success")
             await rpc_to_frontend(self._ctx, "appointmentBooked", {
                 "id": appt_id, "name": name, "date": date,
                 "time": time, "intent": intent,
@@ -424,10 +362,13 @@ class HealthDeskAgent(Agent):
         conn.close()
 
         if affected:
+            await notify_tool(self._ctx, "Appointment Cancelled ✅", "success")
             await rpc_to_frontend(self._ctx, "appointmentCancelled", {
                 "date": date, "time": time
             })
             return f"Appointment on {date} at {time} has been cancelled."
+        
+        # await notify_tool(self._ctx, "No active appointment found ❌", "error")
         return f"No active appointment found on {date} at {time}."
 
 
@@ -456,6 +397,7 @@ class HealthDeskAgent(Agent):
                 conn.close()
                 return f"No active appointment found on {old_date} at {old_time}."
             conn.commit()
+            await notify_tool(self._ctx, "Appointment Rescheduled ✅", "success")
             await rpc_to_frontend(self._ctx, "appointmentRescheduled", {
                 "old_date": old_date, "old_time": old_time,
                 "new_date": new_date, "new_time": new_time,
@@ -500,20 +442,16 @@ async def healthdesk_agent(ctx: JobContext):
 
     await ctx.connect()
 
-
     session = AgentSession(
         stt=inference.STT(model="deepgram/nova-3", language="multi"),
-        llm=inference.LLM(model="openai/gpt-4o"),
-        tts = inference.TTS(model="cartesia/sonic-2",),
-        # tts=inference.TTS(
-        #     model="elevenlabs/eleven_turbo_v2_5",
-        #     voice="cgSgspJ2msm6clMCkdW9",  # ElevenLabs Jessica — warm, professional
-        # ),
-        turn_detection=MultilingualModel(),
+        llm=inference.LLM(model="openai/gpt-4o-mini"),
+        tts=inference.TTS(
+            model="cartesia/sonic-2",
+            voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+        ),
         vad=ctx.proc.userdata["vad"],
-        preemptive_generation=True,
+        preemptive_generation=False,
     )
-
   
     usage_collector = metrics.UsageCollector()
 
@@ -531,7 +469,7 @@ async def healthdesk_agent(ctx: JobContext):
     avatar = tavus.AvatarSession(
         replica_id=TAVUS_REPLICA_ID,   
         persona_id=TAVUS_PERSONA_ID,   
-        avatar_participant_name="Dr. Grace",
+        avatar_participant_name="Grace",
     )
     await avatar.start(session, room=ctx.room)
 
@@ -550,7 +488,8 @@ async def healthdesk_agent(ctx: JobContext):
             ),
         ),
         room_output_options=RoomOutputOptions(
-            audio_enabled=False,  
+            audio_enabled=False,
+            transcription_enabled=False,
         ),
     )
 

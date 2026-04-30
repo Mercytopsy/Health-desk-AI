@@ -2,3 +2,13 @@ livekit-agents[openai,silero,deepgram,cartesia,tavus]
 python-dotenv
 
 livekit-client @livekit/components-react @livekit/components-styles
+
+livekit-plugins-turn-detector
+python -m pip install --upgrade pip
+python -m pip install livekit-agents
+python -m pip install livekit-plugins-silero
+python -m pip install livekit-plugins-noise-cancellation
+python -m pip install livekit-plugins-tavus
+python -m pip install python-dotenv pydantic
+
+npm install livekit-server-sdk
