@@ -1,4 +1,4 @@
-## 🩺 HealthDesk AI
+## HealthDesk AI
 
 HealthDesk AI is an intelligent voice-based assistant designed to handle patient interactions in real time.
 
