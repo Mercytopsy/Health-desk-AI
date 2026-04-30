@@ -21,3 +21,6 @@ HealthtDesk AI supports multiple patient intents, including:
 
 - **Reschedule Appointments**  
   Modify an existing appointment to a new date or time.
+
+
+[![Watch Demo](https://img.youtube.com/vi/0GaWVmGoIW8/0.jpg)](https://youtu.be/0GaWVmGoIW8)
