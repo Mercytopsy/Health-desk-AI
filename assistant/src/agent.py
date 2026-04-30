@@ -6,6 +6,7 @@ import sqlite3
 from typing import Annotated
 
 from dotenv import load_dotenv
+from pathlib import Path
 from datetime import date
 from pydantic import Field
 
@@ -27,11 +28,14 @@ from livekit.agents import (
     room_io,
 )
 from livekit.plugins import noise_cancellation, silero, tavus
-# from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
 
 logger = logging.getLogger("healthdesk-agent")
 
-load_dotenv()
+# load_dotenv()
+ROOT_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT_DIR / ".env")
+
 
 DB_PATH = "healthdesk.db"
 
