@@ -1,7 +1,5 @@
 ## HealthDesk AI
 
-🌐 **Live App:** https://health-desk-ai-rho.vercel.app
-
 HealthDesk AI is an intelligent voice-based assistant designed to handle patient interactions in real time.
 
 ---
